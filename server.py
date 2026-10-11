@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import mimetypes
+import os
 import secrets
 import sqlite3
 import threading
@@ -435,8 +436,10 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     init_database()
-    server=ThreadingHTTPServer(('127.0.0.1',8000),Handler)
-    print('Game Shop ready: http://127.0.0.1:8000')
+    port = int(os.environ.get('PORT', '8000'))
+    host = '0.0.0.0' if 'PORT' in os.environ else '127.0.0.1'
+    server=ThreadingHTTPServer((host,port),Handler)
+    print(f'Game Shop ready: http://{host}:{port}')
     print('Demo: admin01 / demo1234 | staff01 / demo1234')
     try: server.serve_forever()
     except KeyboardInterrupt: pass

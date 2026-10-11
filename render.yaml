@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: nexus-game-demo
+    runtime: python
+    plan: free
+    region: singapore
+    buildCommand: python -m py_compile server.py
+    startCommand: python server.py
+    healthCheckPath: /
