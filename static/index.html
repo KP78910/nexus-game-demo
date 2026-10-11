@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <title>NEXUS GAME · ระบบจัดการร้านเกม</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">N</span><div><b>NEXUS<span class="text-accent">GAME</span></b><small>GAME SHOP MANAGEMENT</small></div></div>
+      <p class="nav-label">เมนูหลัก</p>
+      <nav id="nav" aria-label="นำทาง"></nav>
+      <div class="sidebar-foot"><span class="status-dot"></span> Local Demo Server<br/><small>ข้อมูลบันทึกใน SQLite</small></div>
+    </aside>
+    <div class="workspace">
+      <header class="topbar">
+        <div><div class="eyebrow">GAME SHOP CONTROL CENTER</div><h1 id="page-title">ภาพรวมร้านเกม</h1></div>
+        <div class="top-actions"><span class="date-pill" id="clock"></span><button class="icon-button" id="refresh" title="รีเฟรชข้อมูล">↻</button><div id="profile"></div></div>
+      </header>
+      <main id="content" class="main" aria-live="polite"></main>
+      <footer class="footer">โปรเจกต์สาธิตสำหรับงานฐานข้อมูล · ควบคุมเครื่องและ QR Payment แบบจำลอง ไม่ใช่ระบบชำระเงินจริง</footer>
+    </div>
+  </div>
+  <div id="toast" role="status"></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>
