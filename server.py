@@ -330,6 +330,44 @@ def get_audit(user):
         LEFT JOIN STAFF s ON s.staff_id=l.staff_id ORDER BY log_id DESC LIMIT 80''')]
     finally: conn.close()
 
+def get_database_snapshot(user):
+    require_user(user, admin=True)
+    # Fixed table and column lists keep this endpoint read-only and omit password hashes.
+    tables = (
+        ('SALE', 'sale_id', '*'),
+        ('PAYMENT', 'payment_id', '*'),
+        ('TIME_CODE', 'time_code_id', '*'),
+        ('SALE_DETAIL', 'sale_detail_id', '*'),
+        ('USAGE_SESSION', 'session_id', '*'),
+        ('AUDIT_LOG', 'log_id', '*'),
+        ('COMPUTER', 'computer_id', '*'),
+        ('TIME_PACKAGE', 'package_id', '*'),
+        ('PROMOTION', 'promotion_id', '*'),
+        ('STAFF', 'staff_id', 'staff_id,staff_name,username,role,staff_status'),
+    )
+    conn = db_connection()
+    try:
+        conn.execute('BEGIN')
+        result = []
+        for name, primary_key, columns in tables:
+            count = conn.execute(f'SELECT COUNT(*) FROM {name}').fetchone()[0]
+            cursor = conn.execute(
+                f'SELECT {columns} FROM {name} ORDER BY {primary_key} DESC LIMIT 100'
+            )
+            result.append({
+                'name': name,
+                'count': count,
+                'columns': [column[0] for column in cursor.description],
+                'rows': [dict(row) for row in cursor.fetchall()],
+            })
+        conn.commit()
+        return {'snapshot_at': now_iso(), 'tables': result}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
 def reset_demo(user):
     require_user(user,admin=True)
     conn=db_connection()
@@ -404,6 +442,7 @@ class Handler(BaseHTTPRequestHandler):
             if path=='/api/state':return self.respond(200,get_state(user))
             if path=='/api/reports':return self.respond(200,get_reports(user))
             if path=='/api/audit':return self.respond(200,get_audit(user))
+            if path=='/api/database':return self.respond(200,get_database_snapshot(user))
             raise AppError('ไม่พบ API',404)
     def do_GET(self):
         path=urlsplit(self.path).path

@@ -4,10 +4,10 @@ let state = {user:null,computers:[],packages:[],promotions:[],stats:{total:0,ava
 let page = new URLSearchParams(location.search).get('client') ? 'client' : 'dashboard';
 let selectedPC = +(new URLSearchParams(location.search).get('pc')||1);
 let selectedPackage = 2, selectedPromo = '', payMethod = 'CASH';
-let receipt=null,topupReceipt=null,reportData=null,auditData=null;
+let receipt=null,topupReceipt=null,reportData=null,auditData=null,databaseData=null,databasePreviousData=null;
 let topupCodeDraft="", clientCodeDraft="";
 let timer = null;
-const navItems=[['dashboard','◈','ภาพรวมร้านเกม'],['sale','▣','ขายรหัสเวลา'],['client','▤','เครื่องลูกค้า'],['topup','◷','เติมเวลาเล่น'],['reports','▥','รายงานยอดขาย'],['audit','≡','ประวัติการดำเนินการ']];
+const navItems=[['dashboard','◈','ภาพรวมร้านเกม'],['sale','▣','ขายรหัสเวลา'],['client','▤','เครื่องลูกค้า'],['topup','◷','เติมเวลาเล่น'],['reports','▥','รายงานยอดขาย'],['audit','≡','ประวัติการดำเนินการ'],['database','▦','ตารางฐานข้อมูล']];
 const titleByPage=Object.fromEntries(navItems.map(x=>[x[0],x[2]]));
 const esc=(value)=>String(value??'').replace(/[&<>"']/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const baht=(x)=>new Intl.NumberFormat('th-TH',{style:'currency',currency:'THB',maximumFractionDigits:2}).format(Number(x||0));
@@ -17,11 +17,12 @@ const statusPill=(status)=>{let mode=({ACTIVE:'good',SUCCESS:'good',COMPLETED:'g
 function notify(message,err=false){const el=$('#toast');el.textContent=message;el.className=err?'err':'';el.style.display='block';clearTimeout(timer);timer=setTimeout(()=>el.style.display='none',4200);}
 async function api(endpoint,method='GET',body=null){let resp;try{resp=await fetch('/api'+endpoint,{method,credentials:'same-origin',headers:method==='POST'?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});}catch(e){throw new Error('เชื่อมต่อ Server ไม่สำเร็จ กรุณาตรวจสอบว่าเปิด python server.py อยู่');}let json=await resp.json();if(!resp.ok)throw new Error(json.error||'เกิดข้อผิดพลาด');return json;}
 async function reload(){state=await api('/state');if(state.packages.length&&!state.packages.find(p=>p.package_id==selectedPackage))selectedPackage=state.packages[0].package_id;if(!state.computers.find(c=>c.computer_id===selectedPC))selectedPC=state.computers[0]?.computer_id||1;render();}
-function navTo(to){page=to;receipt=null;topupReceipt=null;reportData=null;auditData=null;history.replaceState(null,'',to==='client'?`/?client=1&pc=${selectedPC}`:'/');render();if(to==='reports'&&state.user?.role==='ADMIN')api('/reports').then(d=>{reportData=d;render()}).catch(e=>notify(e.message,true));if(to==='audit'&&state.user?.role==='ADMIN')api('/audit').then(d=>{auditData=d;render()}).catch(e=>notify(e.message,true));}
+async function loadDatabase(){const next=await api('/database');databasePreviousData=databaseData;databaseData=next;render();}
+function navTo(to){page=to;receipt=null;topupReceipt=null;reportData=null;auditData=null;history.replaceState(null,'',to==='client'?`/?client=1&pc=${selectedPC}`:'/');render();if(to==='reports'&&state.user?.role==='ADMIN')api('/reports').then(d=>{reportData=d;render()}).catch(e=>notify(e.message,true));if(to==='audit'&&state.user?.role==='ADMIN')api('/audit').then(d=>{auditData=d;render()}).catch(e=>notify(e.message,true));if(to==='database'&&state.user?.role==='ADMIN')loadDatabase().catch(e=>notify(e.message,true));}
 function render(){
  $('#page-title').textContent=titleByPage[page]||'ร้านเกม';
  $('#clock').textContent=new Date().toLocaleDateString('th-TH',{day:'numeric',month:'short',year:'numeric'});
- $('#nav').innerHTML=navItems.filter(([name])=>name!=='audit'||state.user?.role==='ADMIN').map(([name,ico,label])=>`<button class="nav-btn ${page===name?'active':''}" data-nav="${name}"><span>${ico}</span>${label}</button>`).join('');
+ $('#nav').innerHTML=navItems.filter(([name])=>!['audit','database'].includes(name)||state.user?.role==='ADMIN').map(([name,ico,label])=>`<button class="nav-btn ${page===name?'active':''}" data-nav="${name}"><span>${ico}</span>${label}</button>`).join('');
  $('#profile').innerHTML=state.user?`<div class="profile"><span class="avatar">${state.user.role==='ADMIN'?'A':'S'}</span><span>${esc(state.user.staff_name)}<br/><span class="small-muted">${esc(state.user.role)}</span></span><button class="tiny-link" id="logout">ออก</button></div>`:'<span class="pill">ยังไม่เข้าสู่ระบบ</span>';
  const protectedPage=page!=='client';
  if(protectedPage&&!state.user){$('#content').innerHTML=loginView();return;}
@@ -31,6 +32,7 @@ function render(){
  else if(page==='topup')$('#content').innerHTML=topupView();
  else if(page==='reports')$('#content').innerHTML=state.user?.role==='ADMIN'?reportView():noAccess();
  else if(page==='audit')$('#content').innerHTML=state.user?.role==='ADMIN'?auditView():noAccess();
+ else if(page==='database')$('#content').innerHTML=state.user?.role==='ADMIN'?databaseView():noAccess();
 }
 function loginView(){return `<div class="login-wrap"><div class="login-hero">🎮</div><h2>ยินดีต้อนรับสู่ NEXUS GAME</h2><p class="subheading">เข้าสู่ระบบพนักงานเพื่อใช้งานหน้าจัดการร้าน</p><div class="panel"><form id="login-form"><div class="field"><label>ชื่อผู้ใช้</label><input class="input" name="username" autocomplete="username" value="staff01" required/></div><div class="field"><label>รหัสผ่าน</label><input class="input" type="password" autocomplete="current-password" name="password" value="demo1234" required/></div><button class="button full" type="submit">เข้าสู่ระบบร้านเกม →</button></form><div class="example-creds"><b>บัญชีสำหรับ Demo</b><br/>พนักงาน: <code>staff01 / demo1234</code><br/>เจ้าของร้าน: <code>admin01 / demo1234</code></div><button class="button ghost full" data-nav="client">ดูหน้าเครื่องลูกค้าโดยไม่เข้าสู่ระบบ</button></div></div>`;}
 function dashboardView(){const s=state.stats;let machine=state.computers.map(c=>{
@@ -52,7 +54,24 @@ function clientView(){let pc=state.computers.find(x=>x.computer_id==selectedPC)|
 function topupView(){return `<div class="section-heading"><div><h2>เติมเวลาเล่น</h2><p class="subheading">ซื้อเวลาเพิ่มบนรหัสเดิม โดยไม่ออก TIME_CODE ใหม่</p></div><span class="pill">TOPUP</span></div>${topupReceipt?receiptView(topupReceipt,true):`<div class="split"><div class="panel"><h3>① ค้นหารหัสที่ต้องการเติมเวลา</h3><form id="topup-form"><div class="field"><label>รหัสเวลาเล่นเดิม</label><input class="input" name="code_value" placeholder="กรอกรหัสจากใบเสร็จ" value="${esc(topupCodeDraft)}" autocomplete="off" required/></div><h3>② เลือกเวลาเพิ่ม</h3>${packagesView()}<div class="field"><label>วิธีชำระเงิน</label><select class="select" id="topup-payment"><option value="CASH">เงินสด</option><option value="QR_DEMO">QR (จำลอง)</option></select></div><label class="checkbox-line"><input type="checkbox" name="confirmed" required/> ยืนยันว่าได้รับเงินแล้ว</label><button class="button full sm-gap" type="submit">บันทึกการเติมเวลา →</button></form></div><div class="panel"><h3>สรุปรายการเติมเวลา</h3>${paymentPanel(true)}<p class="help">ระบบจะเพิ่ม SALE, PAYMENT และ SALE_DETAIL ใหม่ โดยอ้างอิง TIME_CODE เดิม ยอดเวลาคงเหลือคำนวณจากยอดซื้อสะสมลบเวลาที่ใช้แล้ว</p><div class="notice sm-gap">รองรับการเติมเวลาระหว่างกำลังใช้งานเครื่องได้ โดย Server จะคำนวณระยะเวลาใหม่ตามเวลาที่ซื้อเพิ่ม</div></div></div>`}`;}
 function reportView(){if(!reportData)return'<div class="panel"><div class="empty">กำลังโหลดรายงานยอดขาย…</div></div>';let r=reportData;let max=Math.max(1,...r.packages.map(x=>x.amount));return `<div class="section-heading"><div><h2>รายงานยอดขาย</h2><p class="subheading">ยอดขายจาก SALE และ PAYMENT ที่ชำระสำเร็จ · วันที่ ${esc(r.today)}</p></div><button class="button secondary small" id="refresh-report">↻ รีเฟรช</button></div><div class="metric-grid"><div class="metric"><span class="k">ยอดขายวันนี้</span><strong class="green">${baht(r.revenue)}</strong></div><div class="metric"><span class="k">รายการขาย</span><strong>${r.sales_count}</strong></div><div class="metric"><span class="k">ขายรหัสใหม่</span><strong>${r.new_codes}</strong></div><div class="metric"><span class="k">รายการเติมเวลา</span><strong>${r.topups}</strong></div></div><div class="panel"><h3>ยอดขายแยกตามแพ็กเกจ (วันนี้)</h3>${r.packages.length?r.packages.map(item=>`<div class="bar-row"><b>${esc(item.name)}</b><div class="bar-track"><div class="bar-fill" style="width:${Math.max(3,item.amount/max*100)}%"></div></div><b>${baht(item.amount)}</b></div>`).join(''):'<div class="empty">ยังไม่มียอดขายวันนี้</div>'}</div><div class="panel"><h3>รายการขายล่าสุด</h3><div class="table-wrap"><table class="table"><thead><tr><th>ID</th><th>วันที่</th><th>รหัส</th><th>แพ็กเกจ</th><th>ประเภท</th><th>ผู้ขาย</th><th>ยอดรับเงิน</th></tr></thead><tbody>${r.sales.length?r.sales.map(s=>`<tr><td>#${s.sale_id}</td><td>${dt(s.sale_date)}</td><td><code>${esc(s.code_value)}</code></td><td>${esc(s.package_name)}</td><td>${statusPill(s.sale_type)}</td><td>${esc(s.staff_name)}</td><td>${baht(s.payment_amount)}</td></tr>`).join(''):'<tr><td colspan="7" class="empty">ยังไม่มีรายการขาย</td></tr>'}</tbody></table></div></div>`;}
 function auditView(){if(!auditData)return'<div class="panel"><div class="empty">กำลังโหลดประวัติการดำเนินการ…</div></div>';return `<div class="section-heading"><div><h2>ประวัติการดำเนินการ</h2><p class="subheading">ผู้ดูแลระบบเท่านั้นที่สามารถตรวจสอบประวัติได้</p></div><button class="button danger small" id="reset-demo">รีเซ็ตข้อมูล Demo</button></div><div class="panel"><h3>Audit Log ล่าสุด</h3><div class="table-wrap"><table class="table"><thead><tr><th>เวลา</th><th>ผู้ดำเนินการ</th><th>Action</th><th>Entity</th><th>รายละเอียด</th></tr></thead><tbody>${auditData.length?auditData.map(a=>`<tr><td>${dt(a.action_time)}</td><td>${esc(a.staff_name||'SYSTEM')}</td><td>${esc(a.action_type)}</td><td>${esc(a.target_table)} #${esc(a.target_id)}</td><td>${esc(a.description)}</td></tr>`).join(''):'<tr><td colspan="5" class="empty">ไม่มีประวัติ</td></tr>'}</tbody></table></div></div><div class="callout">การรีเซ็ตข้อมูลสำหรับเตรียม Demo จะลบรายการขาย รหัสเวลา ประวัติ Session และ Audit Log ทั้งหมด แต่จะเก็บพนักงาน แพ็กเกจ โปรโมชั่น และเครื่องคอมพิวเตอร์ไว้</div>`;}
-function noAccess(){return '<div class="panel"><h3>ไม่มีสิทธิ์เข้าใช้</h3><p class="muted">รายงานยอดขายและ Audit Log เปิดให้เฉพาะ ADMIN</p></div>';}
+function databaseView(){
+ if(!databaseData)return '<div class="panel"><div class="empty">กำลังโหลดตารางฐานข้อมูล…</div></div>';
+ const primary=new Set(['SALE','PAYMENT','TIME_CODE','SALE_DETAIL','USAGE_SESSION','AUDIT_LOG']);
+ const tables=databaseData.tables.map(t=>{
+  const previous=databasePreviousData?.tables.find(item=>item.name===t.name);
+  const oldRows=new Map((previous?.rows||[]).map(row=>[String(row[t.columns[0]]),JSON.stringify(row)]));
+  const delta=previous?t.count-previous.count:null;
+  const change=delta===null?'':` <span class="db-delta">${delta>0?'+':''}${delta}</span>`;
+  const headings=t.columns.map(column=>`<th>${esc(column)}</th>`).join('');
+  const rows=t.rows.map(row=>{
+   const changed=previous&&oldRows.get(String(row[t.columns[0]]))!==JSON.stringify(row);
+   return `<tr class="${changed?'db-changed':''}">${t.columns.map(column=>`<td>${row[column]===null?'<span class="muted">NULL</span>':`<code>${esc(row[column])}</code>`}</td>`).join('')}</tr>`;
+  }).join('');
+  return `<details class="panel db-table" ${primary.has(t.name)?'open':''}><summary><strong>${esc(t.name)}</strong><span>${t.count} แถว${change}</span></summary><div class="table-wrap"><table class="table"><thead><tr>${headings}</tr></thead><tbody>${rows||`<tr><td colspan="${t.columns.length}" class="empty">ยังไม่มีข้อมูล</td></tr>`}</tbody></table></div>${t.count>100?'<p class="help">แสดง 100 แถวล่าสุด</p>':''}</details>`;
+ }).join('');
+ return `<div class="section-heading"><div><h2>ตารางฐานข้อมูล</h2><p class="subheading">ข้อมูลจาก SQLite ที่เว็บกำลังใช้อยู่ · อ่านอย่างเดียว · อัปเดตเมื่อ ${dt(databaseData.snapshot_at)}</p></div><button class="button secondary small" id="refresh-database">↻ รีเฟรช</button></div><div class="callout">หลังขายรหัส ดู SALE, PAYMENT, TIME_CODE, SALE_DETAIL และ AUDIT_LOG; หลังเข้าใช้เครื่อง ดู USAGE_SESSION และ AUDIT_LOG. แถวที่เพิ่มหรือแก้ไขจากการรีเฟรชครั้งก่อนจะถูกเน้นสี</div>${tables}`;
+}
+function noAccess(){return '<div class="panel"><h3>ไม่มีสิทธิ์เข้าใช้</h3><p class="muted">รายงาน Audit Log และตารางฐานข้อมูลเปิดให้เฉพาะ ADMIN</p></div>';}
 
 document.addEventListener('click',async(ev)=>{
  let btn=ev.target.closest('button');if(!btn)return;
@@ -62,8 +81,9 @@ document.addEventListener('click',async(ev)=>{
  if(btn.dataset.again){if(btn.dataset.again==='sale')receipt=null;else topupReceipt=null;render();return;}
  try{
   if(btn.id==='refresh'||btn.id==='refresh-inline'){await reload();notify('อัปเดตข้อมูลล่าสุดแล้ว');}
-  if(btn.id==='logout'){await api('/logout','POST',{});await reload();notify('ออกจากระบบแล้ว');}
+  if(btn.id==='logout'){await api('/logout','POST',{});databaseData=null;databasePreviousData=null;await reload();notify('ออกจากระบบแล้ว');}
   if(btn.id==='refresh-report'){reportData=await api('/reports');render();}
+  if(btn.id==='refresh-database'){btn.disabled=true;try{await loadDatabase();notify('อัปเดตตารางฐานข้อมูลแล้ว');}finally{btn.disabled=false;}}
   if(btn.id==='reset-demo'){if(confirm('ยืนยันรีเซ็ตข้อมูลการขาย รหัส และ Session ทั้งหมด?')){await api('/reset','POST',{});await reload();navTo('dashboard');notify('รีเซ็ตข้อมูล Demo แล้ว');}}
  }catch(e){notify(e.message,true);}
 });
