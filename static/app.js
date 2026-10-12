@@ -21,6 +21,7 @@ async function loadDatabase(){const next=await api('/database');databasePrevious
 function navTo(to){page=to;receipt=null;topupReceipt=null;reportData=null;auditData=null;history.replaceState(null,'',to==='client'?`/?client=1&pc=${selectedPC}`:'/');render();if(to==='reports'&&state.user?.role==='ADMIN')api('/reports').then(d=>{reportData=d;render()}).catch(e=>notify(e.message,true));if(to==='audit'&&state.user?.role==='ADMIN')api('/audit').then(d=>{auditData=d;render()}).catch(e=>notify(e.message,true));if(to==='database'&&state.user?.role==='ADMIN')loadDatabase().catch(e=>notify(e.message,true));}
 function render(){
  $('#page-title').textContent=titleByPage[page]||'ร้านเกม';
+ $('#database-label').textContent='ข้อมูลบันทึกใน '+(state.database_engine||'ฐานข้อมูล');
  $('#clock').textContent=new Date().toLocaleDateString('th-TH',{day:'numeric',month:'short',year:'numeric'});
  $('#nav').innerHTML=navItems.filter(([name])=>!['audit','database'].includes(name)||state.user?.role==='ADMIN').map(([name,ico,label])=>`<button class="nav-btn ${page===name?'active':''}" data-nav="${name}"><span>${ico}</span>${label}</button>`).join('');
  $('#profile').innerHTML=state.user?`<div class="profile"><span class="avatar">${state.user.role==='ADMIN'?'A':'S'}</span><span>${esc(state.user.staff_name)}<br/><span class="small-muted">${esc(state.user.role)}</span></span><button class="tiny-link" id="logout">ออก</button></div>`:'<span class="pill">ยังไม่เข้าสู่ระบบ</span>';
@@ -69,7 +70,7 @@ function databaseView(){
   }).join('');
   return `<details class="panel db-table" ${primary.has(t.name)?'open':''}><summary><strong>${esc(t.name)}</strong><span>${t.count} แถว${change}</span></summary><div class="table-wrap"><table class="table"><thead><tr>${headings}</tr></thead><tbody>${rows||`<tr><td colspan="${t.columns.length}" class="empty">ยังไม่มีข้อมูล</td></tr>`}</tbody></table></div>${t.count>100?'<p class="help">แสดง 100 แถวล่าสุด</p>':''}</details>`;
  }).join('');
- return `<div class="section-heading"><div><h2>ตารางฐานข้อมูล</h2><p class="subheading">ข้อมูลจาก SQLite ที่เว็บกำลังใช้อยู่ · อ่านอย่างเดียว · อัปเดตเมื่อ ${dt(databaseData.snapshot_at)}</p></div><button class="button secondary small" id="refresh-database">↻ รีเฟรช</button></div><div class="callout">หลังขายรหัส ดู SALE, PAYMENT, TIME_CODE, SALE_DETAIL และ AUDIT_LOG; หลังเข้าใช้เครื่อง ดู USAGE_SESSION และ AUDIT_LOG. แถวที่เพิ่มหรือแก้ไขจากการรีเฟรชครั้งก่อนจะถูกเน้นสี</div>${tables}`;
+ return `<div class="section-heading"><div><h2>ตารางฐานข้อมูล</h2><p class="subheading">ข้อมูลจาก ${esc(databaseData.database_engine)} ที่เว็บกำลังใช้อยู่ · อ่านอย่างเดียว · อัปเดตเมื่อ ${dt(databaseData.snapshot_at)}</p></div><button class="button secondary small" id="refresh-database">↻ รีเฟรช</button></div><div class="callout">หลังขายรหัส ดู SALE, PAYMENT, TIME_CODE, SALE_DETAIL และ AUDIT_LOG; หลังเข้าใช้เครื่อง ดู USAGE_SESSION และ AUDIT_LOG. แถวที่เพิ่มหรือแก้ไขจากการรีเฟรชครั้งก่อนจะถูกเน้นสี</div>${tables}`;
 }
 function noAccess(){return '<div class="panel"><h3>ไม่มีสิทธิ์เข้าใช้</h3><p class="muted">รายงาน Audit Log และตารางฐานข้อมูลเปิดให้เฉพาะ ADMIN</p></div>';}
 

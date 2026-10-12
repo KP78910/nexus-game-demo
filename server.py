@@ -1,4 +1,4 @@
-"""Game Shop demo, Python 3 standard library only. Run: python server.py"""
+"""Game Shop demo. Set DATABASE_URL to use PostgreSQL; otherwise use SQLite."""
 from __future__ import annotations
 
 import hashlib
@@ -16,6 +16,7 @@ from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit, parse_qs
+from database import connect as db_connection, engine as database_engine, initialize_postgres, import_sqlite_once
 
 ROOT = Path(__file__).resolve().parent
 DB_FILE = ROOT / 'game_shop.db'
@@ -36,13 +37,6 @@ def now_iso():
 def th_date():
     return datetime.now(TH).date().isoformat()
 
-def db_connection():
-    conn = sqlite3.connect(DB_FILE, timeout=15, isolation_level=None)
-    conn.row_factory = sqlite3.Row
-    conn.execute('PRAGMA foreign_keys=ON')
-    conn.execute('PRAGMA busy_timeout=15000')
-    return conn
-
 def hash_password(password: str) -> str:
     salt = secrets.token_bytes(16)
     result = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 250_000)
@@ -58,7 +52,17 @@ def valid_password(password: str, stored: str) -> bool:
 
 def init_database():
     conn = db_connection()
-    conn.executescript(SCHEMA_FILE.read_text(encoding='utf-8'))
+    try:
+        if database_engine() == 'PostgreSQL':
+            initialize_postgres(conn)
+            import_sqlite_once(conn)
+        else:
+            conn.executescript(SCHEMA_FILE.read_text(encoding='utf-8'))
+        seed_demo_data(conn)
+    finally:
+        conn.close()
+
+def seed_demo_data(conn):
     if conn.execute('SELECT COUNT(*) FROM STAFF').fetchone()[0] == 0:
         conn.execute('INSERT INTO STAFF(staff_name,username,password_hash,role) VALUES(?,?,?,?)',
                      ('เจ้าของร้าน', 'admin01', hash_password('demo1234'), 'ADMIN'))
@@ -74,7 +78,6 @@ def init_database():
     if conn.execute('SELECT COUNT(*) FROM PROMOTION').fetchone()[0] == 0:
         conn.execute('INSERT INTO PROMOTION(promotion_name,discount_type,discount_value,start_date,end_date,promotion_status) VALUES(?,?,?,?,?,?)',
                      ('ลด 10% สำหรับ Demo', 'PERCENT', 10, '2020-01-01', '2099-12-31', 'ACTIVE'))
-    conn.close()
 
 def user_from_token(token):
     if not token:
@@ -120,10 +123,10 @@ def calc_seconds(conn, time_code_id):
     return max(0, int(purchased - used))
 
 def refresh_expired(conn):
-    rows = conn.execute('SELECT session_id,time_code_id,start_time FROM USAGE_SESSION WHERE session_status="ACTIVE"').fetchall()
+    rows = conn.execute("SELECT session_id,time_code_id,start_time FROM USAGE_SESSION WHERE session_status='ACTIVE'").fetchall()
     for row in rows:
         if calc_seconds(conn,row['time_code_id']) == 0:
-            conn.execute('UPDATE USAGE_SESSION SET end_time=?, session_status="ENDED" WHERE session_id=?', (now_iso(),row['session_id']))
+            conn.execute("UPDATE USAGE_SESSION SET end_time=?, session_status='ENDED' WHERE session_id=?", (now_iso(),row['session_id']))
             write_audit(conn, None, 'AUTO_END', 'USAGE_SESSION', row['session_id'], 'เวลาหมด ระบบปิด Session อัตโนมัติ')
 
 def write_audit(conn, user, action, table, entity_id, desc):
@@ -133,14 +136,14 @@ def write_audit(conn, user, action, table, entity_id, desc):
         table,str(entity_id),now_iso(),desc))
 
 def sale_price(conn, package_id, promo_id):
-    p = conn.execute('SELECT * FROM TIME_PACKAGE WHERE package_id=? AND package_status="ACTIVE"', (package_id,)).fetchone()
+    p = conn.execute("SELECT * FROM TIME_PACKAGE WHERE package_id=? AND package_status='ACTIVE'", (package_id,)).fetchone()
     if not p:
         raise AppError('ไม่พบแพ็กเกจที่เปิดขาย')
     price = money(p['price'])
     promo = None
     discount = 0.0
     if promo_id:
-        promo = conn.execute('SELECT * FROM PROMOTION WHERE promotion_id=? AND promotion_status="ACTIVE"', (promo_id,)).fetchone()
+        promo = conn.execute("SELECT * FROM PROMOTION WHERE promotion_id=? AND promotion_status='ACTIVE'", (promo_id,)).fetchone()
         if not promo or not (promo['start_date'] <= th_date() <= promo['end_date']):
             raise AppError('โปรโมชั่นนี้ไม่สามารถใช้ได้')
         if promo['discount_type'] == 'PERCENT':
@@ -172,23 +175,21 @@ def sale_transaction(user, data, topup=False):
         package, amount, discount = sale_price(conn,pid,promo_id)
         if topup:
             value = str(data.get('code_value', '')).strip().upper()
-            tc = conn.execute('SELECT * FROM TIME_CODE WHERE code_value=? AND code_status="ACTIVE"', (value,)).fetchone()
+            tc = conn.execute("SELECT * FROM TIME_CODE WHERE code_value=? AND code_status='ACTIVE'", (value,)).fetchone()
             if not tc:
                 raise AppError('ไม่พบรหัสที่ใช้งานได้สำหรับเติมเวลา')
             cid = tc['time_code_id']
             code = tc['code_value']
         else:
             code = created_code(conn)
-            cur = conn.execute('INSERT INTO TIME_CODE(code_value,created_at,code_status) VALUES(?,?,"ACTIVE")', (code,now_iso()))
-            cid = cur.lastrowid
-        cur = conn.execute('''INSERT INTO SALE(staff_id,promotion_id,sale_date,discount_amount,sale_status)
-            VALUES(?,?,?,?,"PENDING")''', (user['staff_id'],promo_id,now_iso(),discount))
-        sid = cur.lastrowid
+            cid = conn.execute("INSERT INTO TIME_CODE(code_value,created_at,code_status) VALUES(?,?,'ACTIVE') RETURNING time_code_id", (code,now_iso())).fetchone()[0]
+        sid = conn.execute('''INSERT INTO SALE(staff_id,promotion_id,sale_date,discount_amount,sale_status)
+            VALUES(?,?,?,?,'PENDING') RETURNING sale_id''', (user['staff_id'],promo_id,now_iso(),discount)).fetchone()[0]
         conn.execute('''INSERT INTO PAYMENT(sale_id,payment_method,payment_amount,payment_status,paid_at)
-            VALUES(?,?,?,"SUCCESS",?)''', (sid,method,amount,now_iso()))
+            VALUES(?,?,?,'SUCCESS',?)''', (sid,method,amount,now_iso()))
         conn.execute('''INSERT INTO SALE_DETAIL(sale_id,package_id,time_code_id,sale_type,added_minutes,unit_price)
             VALUES(?,?,?,?,?,?)''', (sid,pid,cid,'TOPUP' if topup else 'NEW',package['duration_minutes'],package['price']))
-        conn.execute('UPDATE SALE SET sale_status="COMPLETED" WHERE sale_id=?',(sid,))
+        conn.execute("UPDATE SALE SET sale_status='COMPLETED' WHERE sale_id=?",(sid,))
         write_audit(conn,user,'TOPUP_TIME' if topup else 'CREATE_SALE','SALE',sid,
                     f'{code}: {package["package_name"]}, รับชำระ {amount:.2f} บาท')
         remaining = calc_seconds(conn,cid)
@@ -218,21 +219,20 @@ def start_session(data):
             raise AppError('รหัสไม่ถูกต้องหรือถูกปิดใช้งาน')
         if calc_seconds(conn,tc['time_code_id']) <= 0:
             raise AppError('รหัสนี้ไม่มีเวลาเล่นคงเหลือ กรุณาเติมเวลา')
-        if conn.execute('SELECT 1 FROM USAGE_SESSION WHERE time_code_id=? AND session_status="ACTIVE"',(tc['time_code_id'],)).fetchone():
+        if conn.execute("SELECT 1 FROM USAGE_SESSION WHERE time_code_id=? AND session_status='ACTIVE'",(tc['time_code_id'],)).fetchone():
             raise AppError('รหัสนี้กำลังใช้งานอยู่บนเครื่องอื่น ไม่สามารถใช้ซ้ำได้',409)
-        if conn.execute('SELECT 1 FROM USAGE_SESSION WHERE computer_id=? AND session_status="ACTIVE"',(comp_id,)).fetchone():
+        if conn.execute("SELECT 1 FROM USAGE_SESSION WHERE computer_id=? AND session_status='ACTIVE'",(comp_id,)).fetchone():
             raise AppError('เครื่องนี้มีผู้เล่นใช้งานอยู่แล้ว',409)
-        cur=conn.execute('''INSERT INTO USAGE_SESSION(time_code_id,computer_id,start_time,session_status)
-          VALUES(?,?,?,"ACTIVE")''',(tc['time_code_id'],comp_id,now_iso()))
-        write_audit(conn,None,'START_SESSION','USAGE_SESSION',cur.lastrowid,f'{pc["computer_name"]}: เริ่มใช้รหัส {code}')
+        session_id=conn.execute('''INSERT INTO USAGE_SESSION(time_code_id,computer_id,start_time,session_status)
+          VALUES(?,?,?,'ACTIVE') RETURNING session_id''',(tc['time_code_id'],comp_id,now_iso())).fetchone()[0]
+        write_audit(conn,None,'START_SESSION','USAGE_SESSION',session_id,f'{pc["computer_name"]}: เริ่มใช้รหัส {code}')
         conn.commit()
-        return dict(session_id=cur.lastrowid,computer_name=pc['computer_name'],code_value=code,
+        return dict(session_id=session_id,computer_name=pc['computer_name'],code_value=code,
                     remaining_seconds=calc_seconds(conn,tc['time_code_id']))
-    except sqlite3.IntegrityError:
+    except Exception as exc:
         conn.rollback()
-        raise AppError('เครื่องหรือรหัสกำลังถูกใช้งานอยู่แล้ว',409)
-    except Exception:
-        conn.rollback()
+        if isinstance(exc, sqlite3.IntegrityError) or getattr(exc, 'sqlstate', None) == '23505':
+            raise AppError('เครื่องหรือรหัสกำลังถูกใช้งานอยู่แล้ว',409) from exc
         raise
     finally: conn.close()
 
@@ -249,7 +249,7 @@ def end_session(data,user=None):
         if not item: raise AppError('ไม่พบ Session ที่กำลังใช้งาน')
         if (not user or user['role']!='ADMIN') and code != item['code_value']:
             raise AppError('รหัสไม่ตรงกับ Session ที่กำลังใช้งาน',403)
-        conn.execute('UPDATE USAGE_SESSION SET end_time=?,session_status="ENDED" WHERE session_id=?',(now_iso(),item['session_id']))
+        conn.execute("UPDATE USAGE_SESSION SET end_time=?,session_status='ENDED' WHERE session_id=?",(now_iso(),item['session_id']))
         write_audit(conn,user,'END_SESSION','USAGE_SESSION',item['session_id'],'ออกจากเครื่องโดยผู้ใช้')
         remaining=calc_seconds(conn,item['time_code_id'])
         conn.commit()
@@ -277,10 +277,10 @@ def get_state(user):
             r['remaining_seconds']=calc_seconds(conn,r['time_code_id']) if r['occupied'] else None
             if not user: r.pop('code_value',None)
             pcs.append(r)
-        packages=[dict(r) for r in conn.execute('SELECT * FROM TIME_PACKAGE WHERE package_status="ACTIVE" ORDER BY duration_minutes')]
-        promotions=[dict(r) for r in conn.execute('''SELECT * FROM PROMOTION WHERE promotion_status="ACTIVE"
+        packages=[dict(r) for r in conn.execute("SELECT * FROM TIME_PACKAGE WHERE package_status='ACTIVE' ORDER BY duration_minutes")]
+        promotions=[dict(r) for r in conn.execute('''SELECT * FROM PROMOTION WHERE promotion_status='ACTIVE'
              AND start_date<=? AND end_date>=? ORDER BY promotion_id''',(th_date(),th_date()))]
-        data=dict(computers=pcs,packages=packages,promotions=promotions,user=user,
+        data=dict(computers=pcs,packages=packages,promotions=promotions,user=user,database_engine=database_engine(),
                   stats=dict(total=len(pcs),available=sum(p['machine_status']=='READY' and not p['occupied'] for p in pcs),
                   busy=sum(p['occupied'] for p in pcs),maintenance=sum(p['machine_status']!='READY' for p in pcs)))
         if user:
@@ -361,7 +361,7 @@ def get_database_snapshot(user):
                 'rows': [dict(row) for row in cursor.fetchall()],
             })
         conn.commit()
-        return {'snapshot_at': now_iso(), 'tables': result}
+        return {'snapshot_at': now_iso(), 'database_engine': database_engine(), 'tables': result}
     except Exception:
         conn.rollback()
         raise
@@ -420,7 +420,7 @@ class Handler(BaseHTTPRequestHandler):
                 username=str(data.get('username','')).strip()
                 password=str(data.get('password',''))
                 conn=db_connection()
-                try: record=conn.execute('SELECT * FROM STAFF WHERE username=? AND staff_status="ACTIVE"',(username,)).fetchone()
+                try: record=conn.execute("SELECT * FROM STAFF WHERE username=? AND staff_status='ACTIVE'",(username,)).fetchone()
                 finally: conn.close()
                 if not record or not valid_password(password,record['password_hash']):
                     raise AppError('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง',401)

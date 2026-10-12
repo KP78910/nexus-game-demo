@@ -1,6 +1,6 @@
 # NEXUS GAME — ระบบจัดการร้านเกม (Demo สำหรับนำเสนออาจารย์)
 
-ตัวอย่างเว็บแอป UI ภาษาไทย เชื่อมกับฐานข้อมูล **SQLite จริง** โดยใช้ Python 3 standard library เท่านั้น (ไม่ต้องติดตั้ง Flask หรือ npm)
+ตัวอย่างเว็บแอป UI ภาษาไทย ใช้ **PostgreSQL บน Render** และใช้ SQLite เมื่อลองรันในเครื่องโดยไม่ตั้ง `DATABASE_URL`
 
 ## วิธีเปิดใช้งาน (Windows / macOS / Linux)
 
@@ -18,15 +18,27 @@
 
 ฐานข้อมูล `game_shop.db` ถูกสร้างอัตโนมัติในการเปิดครั้งแรก และบันทึกข้อมูลข้ามการเปิดเว็บใหม่
 
+หากต้องการรันกับ PostgreSQL ในเครื่อง ให้ติดตั้ง `requirements.txt` แล้วตั้ง `DATABASE_URL`
+เป็น connection string ของ PostgreSQL ก่อนรันเซิร์ฟเวอร์
+
 ## เปิดบน Render
 
-รีโปมี `render.yaml` สำหรับสร้าง Python Web Service แผน Free: Build Command คือ
-`python -m py_compile server.py` และ Start Command คือ `python server.py`.
+รีโปมี `render.yaml` สำหรับ Python Web Service แผน Free: Build Command คือ
+`pip install -r requirements.txt && python -m py_compile server.py database.py`
+และ Start Command คือ `python server.py`.
 เซิร์ฟเวอร์จะรับพอร์ตจากตัวแปร `PORT` ของ Render โดยอัตโนมัติ
 
-แผน Free ใช้พื้นที่ไฟล์ชั่วคราว การขายและการใช้งานที่บันทึกใน SQLite บนเว็บจะย้อนกลับ
-ไปเป็นข้อมูลใน `game_shop.db` ที่อยู่ในรีโปเมื่อบริการรีสตาร์ตหรือ deploy ใหม่
-หากต้องการเก็บข้อมูลต่อเนื่อง ต้องใช้พื้นที่เก็บข้อมูลถาวรและปรับตำแหน่งไฟล์ฐานข้อมูล
+บริการใช้ฐานข้อมูล Render PostgreSQL ชื่อ `nexus-game-demo-db` ใน Singapore
+ตั้งตัวแปร `DATABASE_URL` ใน Web Service เป็น **Internal Database URL** ของฐานข้อมูลนี้
+(หรือให้ Blueprint ดึง `connectionString` ด้วย `fromDatabase`).
+เมื่อเปิดบริการครั้งแรก ระบบสร้าง 10 ตารางจาก `sql/schema_postgres.sql`
+และคัดลอกข้อมูลตัวอย่างจาก `game_shop.db` เข้า PostgreSQL เพียงครั้งเดียว
+หลังจากนั้น PostgreSQL เป็นแหล่งข้อมูลจริงและจะไม่คัดลอกทับเมื่อ deploy ใหม่
+
+หาก `DATABASE_URL` ไม่ถูกตั้ง เว็บจะกลับไปใช้ SQLite ซึ่งเป็นไฟล์ชั่วคราวบน Render
+Render PostgreSQL แผน Free เก็บข้อมูลข้าม deploy ได้ แต่มีขนาด 1 GB
+และหมดอายุ 30 วันหลังสร้าง (ฐานข้อมูลนี้หมดอายุ 11 พฤศจิกายน 2026)
+ควรสำรองข้อมูลหรืออัปเกรดก่อนวันดังกล่าว
 
 ## บัญชี Demo
 
@@ -45,14 +57,14 @@
 - เติมเวลาลงรหัสเดิมผ่านรายการขายใหม่
 - รายงานยอดขายรายวัน แพ็กเกจยอดนิยม จำนวนขายใหม่/เติมเวลา (Admin)
 - Audit Log (Admin)
-- ดูข้อมูล 10 ตารางจาก SQLite ที่เว็บกำลังใช้อยู่ (Admin, อ่านอย่างเดียว; ซ่อน password_hash)
+- ดูข้อมูล 10 ตารางจากฐานข้อมูลที่เว็บกำลังใช้อยู่ (Admin, อ่านอย่างเดียว; ซ่อน password_hash)
 - รีเซ็ตข้อมูลการขายเพื่อ Demo ใหม่ (Admin)
 
 ## Demo 5 ขั้นตามเกณฑ์อาจารย์
 
 1. **ก่อนทำ:** Login `staff01`, เปิด Dashboard แสดง PC-01 ว่าง
 2. **ฟังก์ชันหลัก:** เข้าหน้า "ขายรหัสเวลา" เลือก 2 ชั่วโมง ราคา 60 บาท ติ๊กยืนยันรับเงิน กดขาย คัดลอกรหัส → ไปหน้า "เครื่องลูกค้า" เลือก PC-01 กรอกรหัส กดเข้าใช้งาน
-3. **หลังทำ:** Login `admin01` แล้วเปิด "ตารางฐานข้อมูล" กดรีเฟรชเพื่อดูแถวที่เพิ่มหรือแก้ไขใน `SALE`, `PAYMENT`, `TIME_CODE`, `SALE_DETAIL`, `USAGE_SESSION`, `AUDIT_LOG` (หรือเปิดไฟล์ `game_shop.db` ด้วย SQLite Browser เมื่อรันในเครื่อง) ส่วน `COMPUTER` ไม่ต้อง UPDATE เพราะสถานะมีคนใช้คำนวณจาก Active Session
+3. **หลังทำ:** Login `admin01` แล้วเปิด "ตารางฐานข้อมูล" กดรีเฟรชเพื่อดูแถวที่เพิ่มหรือแก้ไขใน `SALE`, `PAYMENT`, `TIME_CODE`, `SALE_DETAIL`, `USAGE_SESSION`, `AUDIT_LOG` ส่วน `COMPUTER` ไม่ต้อง UPDATE เพราะสถานะมีคนใช้คำนวณจาก Active Session
 4. **กรณีปฏิเสธ:** เลือก PC-02 กรอกรหัสเดิมจาก PC-01 → UI แจ้งว่าใช้รหัสซ้ำ ไม่เปิด Session ใหม่
 5. **ผลลัพธ์:** ออกจากบัญชี staff, Login `admin01`, เปิด "รายงานยอดขาย" → เห็นรายได้ รายการขาย และรหัสที่เพิ่งขาย
 
@@ -60,7 +72,7 @@
 
 ## ฐานข้อมูล 3NF — 10 ตาราง
 
-ดู SQL DDL ที่ `sql/schema.sql`
+ดู SQL DDL ที่ `sql/schema_postgres.sql` สำหรับ Render และ `sql/schema.sql` สำหรับ SQLite ในเครื่อง
 
 - STAFF, PROMOTION, TIME_PACKAGE, TIME_CODE, COMPUTER
 - SALE, SALE_DETAIL, USAGE_SESSION, PAYMENT, AUDIT_LOG
@@ -78,7 +90,7 @@
 
 ## ตรวจสอบฐานข้อมูล SQL
 
-เปิดด้วย DB Browser for SQLite และทดลอง:
+บน Render ดูผ่านเมนู "ตารางฐานข้อมูล" ในเว็บ หรือเชื่อมด้วยไคลเอนต์ PostgreSQL เช่น pgAdmin แล้วทดลอง:
 
 ```sql
 SELECT * FROM SALE ORDER BY sale_id DESC;
